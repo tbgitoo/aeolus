@@ -1,46 +1,15 @@
-AEOLUS 0.9.8  BUILD INSTRUCTIONS (LINUX)
+AEOLUS 0.9.8  BUILD INSTRUCTIONS (ANDROID)
 _______________________________________
 
 
-To build this version, you need to have the shared
-libraries (or newer releases with the same major version):
+This particular distribution of the Aeolus code is intended to be used as a source library in a Android Studio project. As such, it typically 
+goes into a location like app/src/main/cpp/aeolus. Typically, you'll need to include it into your project hierarchy through a higher-level
+CMakeLists.txt file, via appropriate an appropriate add_subdirectory(aeolus) directive (typicylly in the root CMakeLists.txt file, locate in the cpp folder), and you'll have to link the aeolus library directly or indirectly via appropriate target_link_libraries directives, as required in native C / Android projects in general. Behind the scenes, the "add_subdirectory" directive will invoke the CMakeList.txt file in this repository, leading to the production of a shared object library, which is linked as required to other libraries via the "target_link_libraries" directive.  
 
-*  libzita-alsa-pcmi.so.0.3.*
-*  libclthreads.so.2.4.*
-*  libclxclient.so.3.9.*
+This library depends on clthreads, and Android version of which you can find at https://github.com/tbgitoo/clthreads. You need to hook up the clthreads library similarly to the present library with an add_subdirectory(clthreads) command in the root CMakeList.txt file. All in all, you should end up with a directory structure of the kind:
 
-and the corresponding header files installed.
-They should be available from the same place where
-you obtained the Aeolus sources.
+<Your Android Studio Project root>/app/src/main/cpp
+						   /aeolus (and subdirectories)
+                                                   /clthreads (and subdirectories)
 
-Three binary files will be made:
-
-*  aeolus            main program, 
-*  aeolus_x11.so     GUI plugin,
-*  aeolus_txt.so     text mode user interface.
-
-In this version the latter is functional but not complete.
-
-The default Makefile will install the Aeolus binary
-in /usr/local/bin, and the user interface plugins in
-/usr/local/lib (or /usr/local/lib64 on 64-bit systems).
-
-The modify this you can edit the PREFIX definition in
-the Makefile. It is not possible to just move the plugins
-to another location without recompilation as the path
-to them will be compiled into the aeolus binary.
-
-To make:
-
-*  cd to the directory containing the source files
-*  make
-*  (as root) make install
-
-After a successful install you may do a 'make clean'.
-
-Please report any problems (and solutions) to <fons@linuxaudio.org>.
-
-See also the README file for run-time configuration.
-
--- 
-FA
+Attention, clthreads contains a submodule (libbthread) which you will need to recursively initialize when cloning clthreads.
