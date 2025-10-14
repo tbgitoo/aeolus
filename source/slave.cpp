@@ -22,7 +22,7 @@
 #include "slave.h"
 
 
-void Slave::thr_main (void) 
+void Slave::thr_main ()
 {
     ITC_mesg *M;
 
@@ -35,7 +35,7 @@ void Slave::thr_main (void)
 	{
             case MT_CALC_RANK:
             {
-                M_def_rank *X = (M_def_rank *) M;
+                auto *X = (M_def_rank *) M;
                 send_event (TO_MODEL, new M_ifc_ifelm (MT_IFC_ELATT, X->_group, X->_ifelm)); 
                 X->_wave = new Rankwave (X->_sdef->_n0, X->_sdef->_n1);
                 X->_wave->gen_waves (X->_sdef, X->_fsamp, X->_fbase, X->_scale); 
@@ -45,20 +45,24 @@ void Slave::thr_main (void)
 
             case MT_LOAD_RANK:
             {
-                M_def_rank *X = (M_def_rank *) M;
+
+                auto *X = (M_def_rank *) M;
                 send_event (TO_MODEL, new M_ifc_ifelm (MT_IFC_ELATT, X->_group, X->_ifelm)); 
                 X->_wave = new Rankwave (X->_sdef->_n0, X->_sdef->_n1);
                 if (X->_wave->load (X->_path, X->_sdef, X->_fsamp, X->_fbase, X->_scale)) 
                 {
                     X->_wave->gen_waves (X->_sdef, X->_fsamp, X->_fbase, X->_scale); 
-		} 
+		        }
+
                 send_event (TO_AUDIO, M);
                 break;
 	    }
 
             case MT_SAVE_RANK:
             {
-                M_def_rank *X = (M_def_rank *) M;
+                __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                                    "Aeolus Slave", "Saving rank");
+                auto *X = (M_def_rank *) M;
                 X->_wave->save (X->_path, X->_sdef, X->_fsamp, X->_fbase, X->_scale); 
                 M->recover ();
                 break;

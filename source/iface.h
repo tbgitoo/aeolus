@@ -18,27 +18,54 @@
 // ----------------------------------------------------------------------------
 
 
-#ifndef __IFACE_H
-#define __IFACE_H
+#ifndef AEOLUS_IFACE_H
+#define AEOLUS_IFACE_H
 
 
-#include <clthreads.h>
+#include "../../clthreads/include/clthreads.h"
 #include "messages.h"
 
+/**
+ * Virtual base class for the user interface thread. In derived classes, this can implement any type of
+ * user interface - graphical, command line, or like here, interaction with a user interface
+ * interacting via jni calls, or possibly other interfaces
+ */
 
 class Iface : public A_thread
 {
 public:
 
-    Iface (void) : A_thread ("Iface") {}
-    virtual ~Iface (void) {}
-    virtual void stop (void) = 0;
-    void terminate (void) {  put_event (EV_EXIT, 1); }
+    /** Constructor */
+    Iface () : A_thread ("Iface") {}
+    /** Destructor */
+    virtual ~Iface () {}
+    /** Stop the interface thread */
+    virtual void stop () = 0;
+    /** Is the Aeolus synthesizer initializing?
+     * @return True if initializing, false otherwise
+     */
+    virtual bool isInitializing()=0;
+    /** Get the number of divisions
+     * @return Number of divisions making up the Aeolus synthesizer
+     */
+    virtual int get_n_divisions()=0;
+    /**
+     * Get the label for a given division
+     * @param division_index The division for which we need the text label
+     * @return Text label as string. The labels are defined in the instrument definition file
+     */
+    virtual const char* getLabelForDivision(int division_index)=0;
+    /**
+     * Terminate the application
+     */
+    void terminate () {  ITC_ctrl::put_event (EV_EXIT, 1); }
+
 
 private:
 
-    virtual void thr_main (void) = 0;
+    void thr_main () override = 0;
 };
+
 
 
 typedef Iface *iface_cr (int ac, char *av []);

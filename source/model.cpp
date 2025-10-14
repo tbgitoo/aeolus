@@ -18,11 +18,12 @@
 // ----------------------------------------------------------------------------
 
 
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <ctype.h>
-#include <time.h>
+#include <cstdlib>
+#include <cstring>
+#include <cstdio>
+#include <cctype>
+#include <ctime>
+#include <android/log.h>
 #include "model.h"
 #include "scales.h"
 #include "global.h"
@@ -77,7 +78,7 @@ Group::Group (void) :
 
 Model::Model (Lfq_u32      *qcomm,
               Lfq_u8       *qmidi,
-	      uint16_t     *midimap,
+	          uint16_t     *midimap,
               const char   *appname,
               const char   *stops,
               const char   *instr,
@@ -90,7 +91,8 @@ Model::Model (Lfq_u32      *qcomm,
     _appname (appname),
     _stops (stops),
     _uhome (uhome),
-    _ready (false), 
+    _ready (false),
+    _isRetuning(false),
     _nasect (0),
     _ndivis (0),
     _nkeybd (0),
@@ -100,12 +102,12 @@ Model::Model (Lfq_u32      *qcomm,
     _pres (0),
     _sc_cmode (0),
     _sc_group (0),
-    _audio (0),
-    _midi (0)
+    _audio (nullptr),
+    _midi (nullptr)
 {
-    sprintf (_instr, "%s/%s", stops, instr);
-    sprintf (_waves, "%s/%s", stops, waves);
-    memset (_midimap, 0, 16 * sizeof (uint16_t));
+    sprintf (_instr, "%s",  instr);
+    sprintf (_waves, "%s", waves);
+
     memset (_preset, 0, NBANK * NPRES * sizeof (Preset *));
 }
 
@@ -117,7 +119,7 @@ Model::~Model (void)
 }
 
 
-void Model::thr_main (void)
+void Model::thr_main ()
 {
     int E;
 
@@ -126,6 +128,8 @@ void Model::thr_main (void)
     inc_time (100000);
     while ((E = get_event_timed ()) != EV_EXIT)
     {
+
+
 	switch (E)
 	{
         case FM_AUDIO:
@@ -135,7 +139,8 @@ void Model::thr_main (void)
             proc_mesg (get_message ());
 	    break;
 
-	case EV_TIME:    
+	case EV_TIME:
+
 	    inc_time (50000);
 	    proc_qmidi ();
 	    break;
@@ -153,14 +158,14 @@ void Model::thr_main (void)
 }
 
 
-void Model::init (void)
+void Model::init ()
 {
     read_instr ();
     read_presets ();
 }
 
 
-void Model::fini (void)
+void Model::fini ()
 {
     write_presets ();
 }
@@ -177,6 +182,7 @@ void Model::proc_mesg (ITC_mesg *M)
     case MT_IFC_ELSET:
     case MT_IFC_ELXOR:
     {
+
 	// Set, reset or toggle a stop.
         M_ifc_ifelm *X = (M_ifc_ifelm *) M;
         set_ifelm (X->_group, X->_ifelm, X->type () - MT_IFC_ELCLR);
@@ -212,6 +218,7 @@ void Model::proc_mesg (ITC_mesg *M)
     case MT_IFC_RETUNE:
     {
 	// Recalculate all wavetables.
+        _isRetuning=true;
         M_ifc_retune *X = (M_ifc_retune *) M;
         retune (X->_freq, X->_temp);
 	break;
@@ -238,7 +245,7 @@ void Model::proc_mesg (ITC_mesg *M)
     }
     case MT_IFC_MCGET:
     {
-	// Recall midi routing preset.
+	// Recall midi channel configuration preset
         int index;
 	M_ifc_chconf *X = (M_ifc_chconf *) M;
         index = X->_index;
@@ -296,6 +303,7 @@ void Model::proc_mesg (ITC_mesg *M)
     }
     case MT_IFC_PRGET:
     {
+
 	// Read a preset.
 	M_ifc_preset *X = (M_ifc_preset *) M;
         X->_stat = get_preset (X->_bank, X->_pres, X->_bits);
@@ -337,33 +345,52 @@ void Model::proc_mesg (ITC_mesg *M)
 	break;
     }
     case MT_AUDIO_INFO:
+    {
 	// Initialisation info from audio thread.
-        _audio = (M_audio_info *) M; 
-        M = 0;
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Aeolus Model", "MT_AUDIO_INFO: Initialisation info from audio thread");
+
+        _audio = M_audio_info::createCopy((M_audio_info*)M);
+
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                                "Aeolus Model", "MT_AUDIO_INFO: Sampling %f",_audio->_fsamp);
+
         if (_midi)
 	{
             init_audio ();
             init_iface ();
             init_ranks (MT_LOAD_RANK);
-	}
+	}}
+
 	break;
 
     case MT_MIDI_INFO:
 	// Initialisation info from midi thread.
-        _midi = (M_midi_info *) M; 
-        M = 0;
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Aeolus Model", "MT_MIDI_INFO: Received midi basic info");
+
+            _midi = M_midi_info::createCopy((M_midi_info *) M);
+
         if (_audio)
 	{
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Aeolus Model", "MT_MIDI_INFO: Sampling %f",_audio->_fsamp);
             init_audio ();
             init_iface ();
             init_ranks (MT_LOAD_RANK);
+            //save_ranks(); // For later storage
 	}
 	break;
 
     case MT_AUDIO_SYNC:
 	// Wavetable calculation done.
-        send_event (TO_IFACE, new ITC_mesg (MT_IFC_READY));
+        save_ranks();
+         send_event (TO_IFACE, new ITC_mesg (MT_IFC_READY));
         _ready = true;
+        if(_isRetuning) {
+            _isRetuning = false;
+            send_event( TO_IFACE, new ITC_mesg( MT_IFC_RETUNING_DONE));
+        }
 	break;
 
     default:
@@ -373,7 +400,7 @@ void Model::proc_mesg (ITC_mesg *M)
 }    
 
 
-void Model::proc_qmidi (void)
+void Model::proc_qmidi ()
 {
     int c, d, p, t, v;
 
@@ -394,7 +421,7 @@ void Model::proc_qmidi (void)
 	switch (t & 0xF0)
         {
 	case 0x90:
-	    // Program change from notes 24..33.
+	    // Program change from notes 24..33, that is select preset p-24 from current bank.
 	    set_state (_bank, p - 24);
 	    break;
 
@@ -449,23 +476,30 @@ void Model::proc_qmidi (void)
 }
 
 
-void Model::init_audio (void)
+void Model::init_audio ()
 {
+
     int          d;
     Divis        *D;
     M_new_divis  *M;
 
+
+
     for (d = 0, D = _divis; d < _ndivis; d++, D++)
     {
-        M = new M_new_divis (); 
+        M = new M_new_divis ();
+
         M->_flags = D->_flags;
         M->_dmask = D->_dmask;
         M->_asect = D->_asect;
         M->_swell = D->_param [Divis::SWELL]._val;
         M->_tfreq = D->_param [Divis::TFREQ]._val;
         M->_tmodd = D->_param [Divis::TMODD]._val;
-        send_event (TO_AUDIO, M);  
+
+        send_event (TO_AUDIO, M);
+
     }
+
 }
 
 
@@ -519,19 +553,27 @@ void Model::init_iface (void)
 	M->_temped [i]._label = scales [i]._label;
 	M->_temped [i]._mnemo = scales [i]._mnemo;
     }
+
     send_event (TO_IFACE, M);
+
+
 
     for (j = 0; j < 4; j++)
     {
         send_event (TO_IFACE, new M_ifc_aupar (0, -1, j, _audio->_instrpar [j]._val));
     }
+
+
     for (i = 0; i < _nasect; i++)
     {
-	for (j = 0; j < 5; j++)
+
+	for (j = 0; j < 1; j++)
 	{
-	    send_event (TO_IFACE, new M_ifc_aupar (0, i, j, _audio->_asectpar [i][j]._val));
+        // This doesn't seem to work at present, there are no asectpars stored
+	    //send_event (TO_IFACE, new M_ifc_aupar (0, i, j, _audio->_asectpar [i][j]._val));
 	}
     }
+
     for (i = 0; i < _ndivis; i++)
     {
 	for (j = 0; j < 3; j++)
@@ -539,6 +581,10 @@ void Model::init_iface (void)
 	    send_event (TO_IFACE, new M_ifc_dipar (0, i, j, _divis [i]._param [j]._val));
 	}
     }
+
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Model::init_iface", "channel 0 %d",_chconf [0]._bits[0]);
+
     set_mconf (0, _chconf [0]._bits);
 }
 
@@ -567,6 +613,9 @@ void Model::proc_rank (int g, int i, int comm)
     M_def_rank  *M;
     Ifelm       *I;
     Rank        *R;
+
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Model::proc_rank", "fsamp %f",_audio->_fsamp);
 
     I = _group [g]._ifelms + i;
     if ((I->_type == Ifelm::DIVRANK) || (I->_type == Ifelm::KBDRANK))
@@ -622,14 +671,22 @@ void Model::set_ifelm (int g, int i, int m)
 {
     int    s;
     Ifelm  *I;
-    Group  *G;    
+    Group  *G;
+
+
 
     G = _group + g;
-    if ((! _ready) || (g >= _ngroup) || (i >= G->_nifelm)) return;
+    if ((! _ready) || (g >= _ngroup) || (i >= G->_nifelm)){
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Aeolus Model", "Issue setting interface element %d %d %d",g,i,m);
+        return;
+    }
     I = G->_ifelms + i;
     s = (m == 2) ? I->_state ^ 1 : m;
+
     if (I->_state != s)
     {
+        
 	I->_state = s;
         if (_qcomm->write_avail ())
 	{
@@ -764,12 +821,22 @@ void Model::set_mconf (int i, uint16_t *d)
     midi_off (127);
     for (j = 0; j < 16; j++)
     {
-        a = d [j];
-	b =  (a & 0x1000) ? (_keybd [a & 7]._flags & 127) : 0;
-        b |= a & 0x7700;
+        a = d [j]; // Get the intended mask entry
+
+        // a is a 2-byte the structure. If in the upper byte, the 16-bit is activated, use the lowest
+        // 3 bits of a to access the keyboard flags, otherwise start out with 0
+	    b =  (a & 0x1000) ? (_keybd [a & 7]._flags & 127) : 0;
+
+
+        b |= a & 0x7700; // keep the upper byte as is
+        if((a & 7)==7) // To be used as special preset such as to have channel 0 play on all keys
+        {
+            b |= 0x007F;
+        }
+
         _midimap [j] = b;
     }
-    send_event (TO_IFACE, new M_ifc_chconf (MT_IFC_MCSET, i, d));         
+    send_event (TO_IFACE, new M_ifc_chconf (MT_IFC_MCSET, i, d));
 }
 
 
@@ -805,7 +872,7 @@ void Model::recalc (int g, int i)
 }
 
 
-void Model::save (void)
+void Model::save ()
 {
     int     g, i;
     Group   *G;
@@ -838,11 +905,11 @@ Rank *Model::find_rank (int g, int i)
         r = (I->_action0 >>  8) & 255;
         return _divis [d]._ranks + r;
     }
-    return 0;
+    return nullptr;
 }
 
 
-int Model::read_instr (void)
+int Model::read_instr ()
 {
     FILE          *F;
     int           line, stat, n;
@@ -864,12 +931,16 @@ int Model::read_instr (void)
            BAD_STR1, BAD_STR2 };
 
     sprintf (buff, "%s/definition", _instr);
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Aeolus Model", "Instrument definition file %s",_instr);
     if (! (F = fopen (buff, "r"))) 
     {
-	fprintf (stderr, "Can't open '%s' for reading\n", buff);
+        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                            "Aeolus Model", "Cannot open instrument definition file");
         return 1;
-    } 
-    printf ("Reading '%s'\n", buff);
+    }
+
+
    
     stat = 0;
     line = 0;
@@ -880,6 +951,7 @@ int Model::read_instr (void)
    
     while (! stat && fgets (buff, 1024, F))
     {
+
         line++;
         p = buff; 
         if (*p != '/')
@@ -887,7 +959,9 @@ int Model::read_instr (void)
             while (isspace (*p)) p++;
             if ((*p > ' ') && (*p != '#'))
 	    {
-                fprintf (stderr, "Syntax error in line %d\n", line);
+            __android_log_print(android_LogPriority::ANDROID_LOG_WARN,
+                                "Aeolus Model", "Syntax error in line %d",line);
+
                 stat = COMM;
 	    }
             continue;
@@ -921,17 +995,21 @@ int Model::read_instr (void)
 		q += n;
                 if (_nkeybd == NKEYBD)
 		{
-		    fprintf (stderr, "Line %d: can't create more than %d keyboards\n", line, NKEYBD);
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: can't create more than %d keyboards",line,NKEYBD);
+
                     stat = ERROR;
 		}
                 else if (strlen (t1) > 15) stat = BAD_STR1;
                 else
 		{
                     k = _nkeybd++;
-		    K = _keybd + k; 
+		            K = _keybd + k;
                     strcpy (K->_label, t1);
                     K->_flags = 1 << k;
                     if (p [1] == 'p') K->_flags |= HOLD_MASK | Keybd::IS_PEDAL;
+
 		}
 	    }
 	}
@@ -944,7 +1022,10 @@ int Model::read_instr (void)
 		q += n;
 		if (_ndivis == NDIVIS)
 		{
-		    fprintf (stderr, "Line %d: can't create more than %d divisions\n", line, NDIVIS);
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: can't create more than %d divisions\n", line, NDIVIS);
+
 		    stat = ERROR;
 		}
 		else if (strlen (t1) > 15) stat = BAD_STR1;
@@ -975,7 +1056,10 @@ int Model::read_instr (void)
 		q += n;
 		if (_ngroup == NGROUP)
 		{
-		    fprintf (stderr, "Line %d: can't create more than %d groups\n", line, NGROUP);
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: can't create more than %d groups\n", line, NGROUP);
+
 		    stat = ERROR;
 		}
 		else if (strlen (t1) > 15) stat = BAD_STR1;
@@ -1006,7 +1090,10 @@ int Model::read_instr (void)
    	        q += n;
                 if (D->_nrank == Divis::NRANK) 
 		{
-		    fprintf (stderr, "Line %d: can't create more than %d ranks per division\n", line, Divis::NRANK);
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: can't create more than %d ranks per division\n", line, Divis::NRANK);
+
 		    stat = ERROR;
 		}
                 else if (strlen (t1) > 63) stat = BAD_STR1;
@@ -1016,7 +1103,11 @@ int Model::read_instr (void)
         	    strcpy (A->_filename, t1);
                     if (A->load (_stops))
 		    {
-			stat = ERROR;
+                __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                    "Aeolus Model",
+                                    "Line %d: Faild to load Addsynth, file %s, dir %s", line, t1,_stops);
+
+                stat = ERROR;
 			delete A;
  		    }
                     else
@@ -1026,7 +1117,7 @@ int Model::read_instr (void)
 			R = D->_ranks + D->_nrank++; 
                         R->_count = 0;
                         R->_sdef = A;
-                        R->_wave = 0;
+                        R->_wave = nullptr;
 		    }
  		}
 	    }
@@ -1117,7 +1208,10 @@ int Model::read_instr (void)
                     } while (!done && ++i < max_ranks);
                     if (!done)
                     {
-                        fprintf (stderr, "Line %d: a stop can not control more than %d ranks\n", line, max_ranks);
+                        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                            "Aeolus Model",
+                                            "Line %d: a stop can not control more than %d ranks\n", line, max_ranks);
+
                         stat = ERROR;
                     }
                     else if (i > 0)
@@ -1176,48 +1270,85 @@ int Model::read_instr (void)
         switch (stat)
 	{
         case COMM:
-	    fprintf (stderr, "Line %d: unknown command '%s'\n", line, p);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: unknown command '%s'\n", line, p);
             break;
         case ARGS:
-	    fprintf (stderr, "Line %d: missing arguments in '%s' command\n", line, p);   
-            break;
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: missing arguments in '%s' command\n", line, p);
+	        break;
         case MORE:
-	    fprintf (stderr, "Line %d: extra arguments in '%s' command\n", line, p);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: extra arguments in '%s' command\n", line, p);
             break;
         case NO_INSTR:
-	    fprintf (stderr, "Line %d: command '%s' outside instrument scope\n", line, p);   
-            break;
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: command '%s' outside instrument scope\n", line, p);
+                        break;
         case IN_INSTR:
-	    fprintf (stderr, "Line %d: command '%s' inside instrument scope\n", line, p);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: command '%s' inside instrument scope\n", line, p);
             break;
         case BAD_SCOPE:
-	    fprintf (stderr, "Line %d: command '%s' in wrong scope\n", line, p);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: command '%s' in wrong scope\n", line, p);
             break;
         case BAD_ASECT:
-	    fprintf (stderr, "Line %d: no section '%d'\n", line, s);   
-            break;
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: no section '%d'\n", line, s);
+           break;
         case BAD_RANK:
-	    fprintf (stderr, "Line %d: no rank '%d' in division '%d'\n", line, r, d);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: no rank '%d' in division '%d'\n", line, r, d);
             break;
         case BAD_KEYBD:
-	    fprintf (stderr, "Line %d: no keyboard '%d'\n", line, k);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: no keyboard '%d'\n", line, k);
             break;
         case BAD_DIVIS:
-	    fprintf (stderr, "Line %d: no division '%d'\n", line, d);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: no division '%d'\n", line, d);
             break;
         case BAD_IFACE:
-	    fprintf (stderr, "Line %d: can't create more than '%d' elements per group\n", line, Group::NIFELM);   
-            break;
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: can't create more than '%d' elements per group\n", line, Group::NIFELM);
+	        break;
         case BAD_STR1:
-	    fprintf (stderr, "Line %d: string '%s' is too long\n", line, t1);   
-            break;
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: string '%s' is too long\n", line, t1);
+                        break;
         case BAD_STR2:
-	    fprintf (stderr, "Line %d: string '%s' is too long\n", line, t1);   
+            __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                                "Aeolus Model",
+                                "Line %d: string '%s' is too long\n", line, t1);
+
             break;
 	}
     }
 
     fclose (F);
+    if(stat <= DONE) {
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Aeolus Model",
+                            "Succesfully read instrument definition file");
+    } else {
+        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                            "Aeolus Model",
+                            "Error while read instrument definition file, stats # %d", stat);
+    }
+
     return (stat <= DONE) ? 0 : 2;
 }
 
@@ -1244,7 +1375,7 @@ int Model::write_instr (void)
     t = time (0);
    
     fprintf (F, "# Aeolus instrument definition file\n");
-    fprintf (F, "# Created by Aeolus-%s at %s\n", VERSION, ctime (&t));
+    fprintf (F, "# Created by Aeolus-%s at %s\n", AEOLUS_VERSION, ctime (&t));
 
     fprintf (F, "\n/instr/new\n");
     fprintf (F, "/tuning %5.1f %d\n", _fbase, _itemp); 
@@ -1387,7 +1518,7 @@ void Model::del_preset (int bank, int pres)
 }
 
 
-int Model::read_presets (void)
+int Model::read_presets ()
 {
     int            i, j, k, n;
     char           name [1200];
@@ -1405,25 +1536,36 @@ int Model::read_presets (void)
     {
 	sprintf (name, "%s/presets", _instr);
     }
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Aeolus Model", "Preset file %s",name);
     if (! (F = fopen (name, "r"))) 
     {
-	fprintf (stderr, "Can't open '%s' for reading\n", name);
+        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                            "Aeolus Model", "Could not find preset file %s",name);
         return 1;
     } 
 
     fread (data, 16, 1, F);
     if (strcmp ((char *) data, "PRESET") || data [7])
     {
-	fprintf (stderr, "File '%s' is not a valid preset file\n", name);
+        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                            "Aeolus Model",
+                            "File '%s' is not a valid preset file", name);
         fclose (F);
         return 1;
     }
-    printf ("Reading '%s'\n", name);
-    n = RD2 (data + 14);
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Aeolus Model",
+                        "Reading '%s'", name);
+
+    n = RD2 (data + 14); // number of user interface groups
 
     if (fread (data, 256, 1, F) != 1)
     {
-	fprintf (stderr, "No valid data in file '%s'\n", name);
+        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                            "Aeolus Model",
+                            "No valid data in file '%s'", name);
+
         fclose (F);
         return 1;
     }
@@ -1439,7 +1581,10 @@ int Model::read_presets (void)
 
     if (n != _ngroup)
     {
-	fprintf (stderr, "Presets in file '%s' are not compatible\n", name);
+        __android_log_print(android_LogPriority::ANDROID_LOG_ERROR,
+                            "Aeolus Model",
+                            "Presets in file '%s' are not compatible", name);
+
         fclose (F);
         return 1;
     }
@@ -1463,6 +1608,11 @@ int Model::read_presets (void)
     }
 
     fclose (F);
+
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Aeolus Model",
+                        "Succesfully read preset file '%s'", name);
+
     return 0;
 }
 
@@ -1538,3 +1688,68 @@ int Model::write_presets (void)
     fclose (F);
     return 0;
 }
+
+void Model::save_ranks() {
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "Aeolus Model", "save_ranks");
+
+
+        int    g, i;
+        Group  *G;
+
+
+
+        for (g = 0; g < _ngroup; g++)
+        {
+            G = _group + g;
+            for (i = 0; i < G->_nifelm; i++) proc_rank (g, i, MT_SAVE_RANK);
+        }
+
+    }
+
+Group *Model::getGroupWithLabel(const char *theLabel) {
+    if(theLabel==nullptr)
+    {
+        return nullptr;
+    }
+    int    group_index;
+    Group  *G;
+
+    for (group_index = 0; group_index < _ngroup; group_index++) {
+        G = _group + group_index; // pointer arithmetics, looping through the groups
+        if(strcmp(theLabel, G->_label)==0)
+        {
+            return G;
+        }
+    }
+    return nullptr;
+}
+
+int Model::get_n_tunings() {
+    return NSCALES;
+}
+
+const char *Model::getTuningLabel(int index_tuning) {
+    if(index_tuning<0)
+    {
+        index_tuning=0;
+    }
+    if(index_tuning>=get_n_tunings())
+    {
+        index_tuning=get_n_tunings()-1;
+    }
+   return scales[index_tuning]._label;
+}
+
+int Model::getCurrentTuning() {
+    return _itemp;
+}
+
+float Model::getBaseFrequency() {
+    return _fbase;
+}
+
+bool Model::is_retuning() {
+    return _isRetuning;
+}
+

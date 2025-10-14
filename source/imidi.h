@@ -18,18 +18,16 @@
 // ----------------------------------------------------------------------------
 
 
-#ifndef __IMIDI_H
-#define __IMIDI_H
+#ifndef AEOLUS_IMIDI_H
+#define AEOLUS_IMIDI_H
 
 
-#include <stdlib.h>
-#include <stdio.h>
-#include <clthreads.h>
+#include <cstdlib>
+#include <cstdio>
+#include "../../clthreads/include/clthreads.h"
 #include "lfqueue.h"
 #include "messages.h"
-#if __linux__
-# include <alsa/asoundlib.h>
-#else
+
 enum {
     SND_SEQ_EVENT_NOTEON = 1,
     SND_SEQ_EVENT_NOTEOFF,
@@ -37,18 +35,27 @@ enum {
     SND_SEQ_EVENT_PGMCHANGE,
     SND_SEQ_EVENT_NONE
 };
-#endif
 
-class Imidi : public A_thread
+/**
+ * Base class for the midi thread. The basic role of the midi thread is to convert incoming
+ * midi messages to note queue messages. This among others involves applying the midimapping,
+ * i.e. associating the midi messages to the appplicable preconfigured keyboards
+ */
+class Imidi : public ITC_ctrl
 {
 public:
-
+    /** Constructor with pointers to the queues and midimaps */
     Imidi (Lfq_u32 *qnote, Lfq_u8 *qmidi, uint16_t *midimap, const char *appname);
-    virtual ~Imidi (void);
-
-    void terminate (void);
-    
-protected:
+    ~Imidi () override;
+    /**
+     * Terminate the application
+     */
+    void terminate ();
+    /** Open the midi layer */
+    void open_midi ();
+    /** Close the midi layer */
+    void close_midi ();
+    /** predefined midi event structure */
     struct MidiEvent
     {
         int type;
@@ -57,10 +64,17 @@ protected:
             struct { int channel, param, value; } control;
         };
     };
-    void proc_midi_event(const MidiEvent&);
+    /** Handle midi event. This applieds the midimap lookup (midi channels to keyboards) and
+     * routes control messages to the qmidi queue and note messages to the note queue
+     * @param ev The midi event to be handled by the synthesizer
+     */
+    void proc_midi_event(const MidiEvent& ev);
 
-    void open_midi (void);
-    void close_midi (void);
+    
+protected:
+
+
+
     virtual void on_open_midi() = 0;
     virtual void on_close_midi() = 0;
     virtual void on_terminate() = 0;

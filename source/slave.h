@@ -18,26 +18,41 @@
 // ----------------------------------------------------------------------------
 
 
-#ifndef __SLAVE_H
-#define __SLAVE_H
+#ifndef AEOLUS_SLAVE_H
+#define AEOLUS_SLAVE_H
 
 
-#include <clthreads.h>
+#include "../../clthreads/include/clthreads.h"
 #include "messages.h"
 
-
+/**
+ * Class for separate slave thread for
+ * tasks that take a long time: calculating, saving and loading the ranks
+ * After starting this thread, it runs a loop in thr_main and waits for cltrhead messages
+ * by which it gets instructed to do the rank calculation, saving and loading tasks
+ */
 class Slave : public A_thread
 {
 public:
-
-    Slave (void) : A_thread ("Slave") {}
-    virtual ~Slave (void) {}
-
-    void terminate (void) {  put_event (EV_EXIT, 1); }
+    /**
+     * Constructur
+     */
+    Slave () : A_thread ("Slave") {}
+    /**
+     * Destructor
+     */
+    virtual ~Slave () {}
+    /**
+     * Terminate, including sending the termination message to all other threads
+     */
+    void terminate () {  put_event (EV_EXIT, 1); }
 
 private:
-
-    virtual void thr_main (void);
+    /**
+     * Main thread routing. This is the looping routing waiting for the messages
+     * to be handled
+     */
+     void thr_main () override;
 };
 
 

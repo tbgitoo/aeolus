@@ -1,7 +1,7 @@
 // ----------------------------------------------------------------------------
 //
 //  Copyright (C) 2003-2013 Fons Adriaensen <fons@linuxaudio.org>
-//    
+//
 //  This program is free software; you can redistribute it and/or modify
 //  it under the terms of the GNU General Public License as published by
 //  the Free Software Foundation; either version 3 of the License, or
@@ -18,8 +18,8 @@
 // ----------------------------------------------------------------------------
 
 
-#ifndef __GLOBAL_H
-#define __GLOBAL_H
+#ifndef AEOLUS_GLOBAL_H
+#define AEOLUS_GLOBAL_H
 
 
 #ifdef __APPLE__
@@ -53,7 +53,7 @@
 #include "lfqueue.h"
 
 
-enum // GLOBAL LIMITS 
+enum // GLOBAL LIMITS
 {
     NASECT = 4,
     NDIVIS = 8,
@@ -89,6 +89,8 @@ enum // GLOBAL LIMITS
 #define KEYS_MASK 63
 #define HOLD_MASK 64
 #define ALL_MASK 127
+
+#define AEOLUS_VERSION "0.9.9"
 
 
 class Fparm

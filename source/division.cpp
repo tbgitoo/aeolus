@@ -18,8 +18,9 @@
 // ----------------------------------------------------------------------------
 
 
-#include <math.h>
-#include <string.h>
+#include <cmath>
+#include <cstring>
+#include <android/log.h>
 #include "division.h"
 
 
@@ -36,22 +37,23 @@ Division::Division (Asection *asect, float fsam) :
     _s (0.0f),
     _m (0.0f)
 {
-    for (int i = 0; i < NRANKS; i++) _ranks [i] = 0;    
+    for (int i = 0; i < NRANKS; i++) _ranks [i] = 0;
 }
 
 
-Division::~Division (void)
+Division::~Division ()
 {
 }
 
 
-void Division::process (void) 
+void Division::process ()
 {
     int    i;
     float  d, g, t;
     float  *p, *q; 
 
     memset (_buff, 0, NCHANN * PERIOD * sizeof (float));
+
     for (i = 0; i < _nrank; i++) _ranks [i]->play (1);
 
     g = _swel;
@@ -83,11 +85,11 @@ void Division::process (void)
 
     for (i = 0; i < PERIOD; i++)
     {
-        g += d;
-        q [0 * PERIOD * MIXLEN] += p [0 * PERIOD] * g;
-        q [1 * PERIOD * MIXLEN] += p [1 * PERIOD] * g;
-        q [2 * PERIOD * MIXLEN] += p [2 * PERIOD] * g;
-        q [3 * PERIOD * MIXLEN] += p [3 * PERIOD] * g;
+        g += d; // G is the varying gain for swelling and tremulus modulation
+        q [0 * PERIOD * MIXLEN] += p [0 * PERIOD] * g * _paramgain; // _paramgain is the fixed gain for this division
+        q [1 * PERIOD * MIXLEN] += p [1 * PERIOD] * g * _paramgain;
+        q [2 * PERIOD * MIXLEN] += p [2 * PERIOD] * g * _paramgain;
+        q [3 * PERIOD * MIXLEN] += p [3 * PERIOD] * g * _paramgain;
         p++;
         q++;
     }
@@ -108,7 +110,7 @@ void Division::set_rank (int ind, Rankwave *W, int pan, int del)
     else W->_nmask = 0;
     W->_cmask = 0;
     _ranks [ind] = W;
-    del = (int)(1e-3f * del * _fsam / PERIOD);
+    del = (int)(1e-3f *(float) del * _fsam / PERIOD);
     if (del > 31) del = 31;
     W->set_param (_buff, del, pan);
     if (_nrank < ++ind) _nrank = ind;
@@ -123,6 +125,11 @@ void Division::update (int note, int mask)
     for (r = 0; r < _nrank; r++)
     {
 	W = _ranks [r];
+
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Division::update",
+                                            "1: c-mask %d n-mask %d ",W->_cmask, W->_nmask);
+
         if (W->_cmask & 127)
 	{     
 	    if (mask & W->_cmask) W->note_on (note + 36);
@@ -138,28 +145,36 @@ void Division::update (unsigned char *keys)
     unsigned char  *k;
     Rankwave       *W;
 
+    // run through the ranks for this division
     for (r = 0; r < _nrank; r++)
     {
-	W = _ranks [r];
+	W = _ranks [r]; // get the rank
+        // check with xor (^) whether there is a difference in the lower byte between the rank's c and n mask
         if ((W->_cmask ^ W->_nmask) & 127)
-	{     
+	{
+
+        __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                            "Division::update",
+                            "2: c-mask %d n-mask %d ",W->_cmask, W->_nmask);
+
+            // m is the 7 lowest bits of the ranks n-mask
             m = W->_nmask & 127;               
-            if (m)
+            if (m) // the rank as a non-zero n-mask
 	    {            
-		n0 = W->n0 ();
-		n1 = W->n1 ();
-                k = keys;
-                d = n0 - 36;
-                if (d > 0) k += d;
-                for (n = n0; n <= n1; n++)
+		n0 = W->n0 (); // lowest midi note in the ranks range
+		n1 = W->n1 (); // highest midi note in the ranks range
+                k = keys; // recover a pointer k to the first byte of the keys array
+                d = n0 - 36; // in Aeolus, the lowest note should be 36
+                if (d > 0) k += d; // if in this rank, we start higher, move up in the keys
+                for (n = n0; n <= n1; n++)  // go through all the notes
 	        {
-                    if (*k++ & m) W->note_on (n);
-		    else          W->note_off (n);
+                    if (*k++ & m) W->note_on (n); // if the current byte has bits aligned with ranks mask, play it
+                    else          W->note_off (n); // otherwise, switch it off
 		}
 	    }
-            else W->all_off ();
+            else W->all_off (); // for simplicity, if there is no bit set in the ranks mask, switch it off completely
 	}
-        W->_cmask = W->_nmask;
+        W->_cmask = W->_nmask; // update the mask: the c-mask is set equal to the n-mask
     }
 }
 
@@ -209,4 +224,12 @@ void Division::clr_rank_mask (int ind, int bits)
 
     if (bits == 128) bits |= _dmask;
     W->_nmask &= ~bits;
+}
+
+void Division::setParamGain(float division_volume_gain) {
+   _paramgain=abs(division_volume_gain);
+}
+
+float Division::getParamGain() {
+    return _paramgain;
 }

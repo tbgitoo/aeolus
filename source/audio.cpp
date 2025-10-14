@@ -18,13 +18,15 @@
 // ----------------------------------------------------------------------------
 
 
-#include <math.h>
+#include <cmath>
+#include <android/log.h>
+#include <unistd.h>
 #include "audio.h"
 #include "messages.h"
 
 
 
-Audio::Audio (const char *name, Lfq_u32 *qnote, Lfq_u32 *qcomm) :
+AeolusAudio::AeolusAudio (const char *name, Lfq_u32 *qnote, Lfq_u32 *qcomm) :
     A_thread("Audio"),
     _appname (name),
     _qnote (qnote),
@@ -35,14 +37,14 @@ Audio::Audio (const char *name, Lfq_u32 *qnote, Lfq_u32 *qcomm) :
     _nplay (0),
     _fsamp (0),
     _fsize (0),
-    _bform (0),
+    _bform (false),
     _nasect (0),
     _ndivis (0)
 {
 }
 
 
-Audio::~Audio (void)
+AeolusAudio::~AeolusAudio ()
 {
     int i;
 
@@ -52,9 +54,11 @@ Audio::~Audio (void)
 }
 
 
-void Audio::init_audio (void)
+void AeolusAudio::init_audio ()
 {
     int i;
+
+
     
     _audiopar [VOLUME]._val = 0.32f;
     _audiopar [VOLUME]._min = 0.00f;
@@ -84,21 +88,21 @@ void Audio::init_audio (void)
 }
 
 
-void Audio::start (void)
+void AeolusAudio::start ()
 {
     M_audio_info  *M;
     int           i;
 
     M = new M_audio_info ();
     M->_nasect = _nasect;
-    M->_fsamp  = _fsamp;
-    M->_fsize  = _fsize;
+    M->_fsamp  = (float)_fsamp;
+    M->_fsize  = (int)_fsize;
     M->_instrpar = _audiopar;
     for (i = 0; i < _nasect; i++) M->_asectpar [i] = _asectp [i]->get_apar ();
     send_event (TO_MODEL, M);
 }
 
-void Audio::proc_queue (Lfq_u32 *Q)
+void AeolusAudio::proc_queue (Lfq_u32 *Q)
 {
     uint32_t  k;
     int       b, c, i, j, n;
@@ -107,14 +111,18 @@ void Audio::proc_queue (Lfq_u32 *Q)
     // Execute commands from the model thread (qcomm),
     // or from the midi thread (qnote).
 
+
+
     n = Q->read_avail ();
     while (n > 0)
     {
+
 	k = Q->read (0);
         c = k >> 24;      
         j = (k >> 16) & 255;
         i = (k >>  8) & 255; 
         b = k & 255;
+
 
         switch (c)
 	{
@@ -150,6 +158,9 @@ void Audio::proc_queue (Lfq_u32 *Q)
 
         case 5:
 	    // Set bits in division mask.
+            __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                                "AeolusAudio::proc_queue",
+                                "Setting division bits division %d, bits %d",j,b);
             _divisp [j]->set_div_mask (b); 
 	    Q->read_commit (1);
             break;
@@ -162,7 +173,10 @@ void Audio::proc_queue (Lfq_u32 *Q)
 
         case 7:
 	    // Set bits in rank mask.
-            _divisp [j]->set_rank_mask (i, b); 
+            __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                                "AeolusAudio::proc_queue",
+                                "Activating rank %d in division %d for rank mask %d",i,j,b);
+            _divisp [j]->set_rank_mask (i, b);
 	    Q->read_commit (1);
             break;
 
@@ -198,14 +212,18 @@ void Audio::proc_queue (Lfq_u32 *Q)
             case 1: _divisp [j]->set_tfreq (u.f); break;
             case 2: _divisp [j]->set_tmodd (u.f); break;
             break;
+             default: break;
 	    }
+        break;
+        default:
+            break;
 	}
         n = Q->read_avail ();
     }
 }
 
 
-void Audio::proc_keys1 (void)
+void AeolusAudio::proc_keys1 ()
 {    
     int d, m, n;
 
@@ -214,15 +232,18 @@ void Audio::proc_keys1 (void)
 	m = _keymap [n];
 	if (m & 128)
 	{
-            m &= 127;
+
+
+        m &= 127;
    	    _keymap [n] = m;
+
             for (d = 0; d < _ndivis; d++) _divisp [d]->update (n, m);
 	}
     }
 }
 
 
-void Audio::proc_keys2 (void)
+void AeolusAudio::proc_keys2 ()
 {    
     int d;
 
@@ -230,7 +251,7 @@ void Audio::proc_keys2 (void)
 }
 
 
-void Audio::proc_synth (int nframes) 
+void AeolusAudio::proc_synth (int nframes)
 {
     int           j, k;
     float         W [PERIOD];
@@ -243,15 +264,15 @@ void Audio::proc_synth (int nframes)
     if (fabsf (_revsize - _audiopar [REVSIZE]._val) > 0.001f)
     {
         _revsize = _audiopar [REVSIZE]._val;
-	_reverb.set_delay (_revsize);
+        _reverb.set_delay (_revsize);
         for (j = 0; j < _nasect; j++) _asectp[j]->set_size (_revsize);
     }
     if (fabsf (_revtime - _audiopar [REVTIME]._val) > 0.1f)
     {
         _revtime = _audiopar [REVTIME]._val;
- 	_reverb.set_t60mf (_revtime);
- 	_reverb.set_t60lo (_revtime * 1.50f, 250.0f);
- 	_reverb.set_t60hi (_revtime * 0.50f, 3e3f);
+        _reverb.set_t60mf (_revtime);
+        _reverb.set_t60lo (_revtime * 1.50f, 250.0f);
+        _reverb.set_t60hi (_revtime * 0.50f, 3e3f);
     }
 
     for (j = 0; j < _nplay; j++) out [j] = _outbuf [j];
@@ -265,48 +286,69 @@ void Audio::proc_synth (int nframes)
         memset (Z, 0, PERIOD * sizeof (float));
         memset (R, 0, PERIOD * sizeof (float));
 
+
+        // Process the rankwaves in the division
         for (j = 0; j < _ndivis; j++) _divisp [j]->process ();
+        // Audio date is transmitted to the audiosection, and recovered through the pointers W,X,Y,R
         for (j = 0; j < _nasect; j++) _asectp [j]->process (_audiopar [VOLUME]._val, W, X, Y, R);
+
         _reverb.process (PERIOD, _audiopar [VOLUME]._val, R, W, X, Y, Z);
 
         if (_bform)
-	{
-            for (j = 0; j < PERIOD; j++)
-            {
-	        out [0][j] = W [j];
-	        out [1][j] = 1.41 * X [j];
-	        out [2][j] = 1.41 * Y [j];
-	        out [3][j] = 1.41 * Z [j];
-   	    }
-	}
-        else
         {
             for (j = 0; j < PERIOD; j++)
             {
-	        out [0][j] = W [j] + _audiopar [STPOSIT]._val * X [j] + Y [j];
-	        out [1][j] = W [j] + _audiopar [STPOSIT]._val * X [j] - Y [j];
-   	    }
-	}
-	for (j = 0; j < _nplay; j++) out [j] += PERIOD;
+                out [0][j] = W [j];
+                out [1][j] = 1.41 * X [j];
+                out [2][j] = 1.41 * Y [j];
+                out [3][j] = 1.41 * Z [j];
+            }
+        }
+        else
+        {
+
+
+            for (j = 0; j < PERIOD; j++)
+            {
+                //if(abs(W[0])>0.001f) {
+                //    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                //                        "AeolusAudio", "%d:%f", j,W[j]);
+                //}
+                out [0][j] = W [j] + _audiopar [STPOSIT]._val * X [j] + Y [j];
+
+                if(_nplay>1) { // stereo
+                    out[1][j] = W[j] + _audiopar[STPOSIT]._val * X[j] - Y[j];
+                }
+            }
+        }
+
+        for (j = 0; j < _nplay; j++) out [j] += PERIOD;
+
     }
 }
 
 
-void Audio::proc_mesg (void) 
+
+
+void AeolusAudio::proc_mesg ()
 {
     ITC_mesg *M;
+
 
     while (get_event_nowait () != EV_TIME)
     {
 	M = get_message ();
-        if (! M) continue; 
+        if (! M) continue;
 
         switch (M->type ())
 	{
 	    case MT_NEW_DIVIS:
 	    {
-	        M_new_divis  *X = (M_new_divis *) M;
-                Division     *D = new Division (_asectp [X->_asect], (float) _fsamp);
+
+	        auto  *X = (M_new_divis *) M;
+
+                auto     *D = new Division (_asectp [X->_asect], (float) _fsamp);
+
                 D->set_div_mask (X->_dmask);
                 D->set_swell (X->_swell);
                 D->set_tfreq (X->_tfreq);
@@ -318,17 +360,82 @@ void Audio::proc_mesg (void)
 	    case MT_CALC_RANK:
 	    case MT_LOAD_RANK:
 	    {
-	        M_def_rank *X = (M_def_rank *) M;
+	        auto *X = (M_def_rank *) M;
                 _divisp [X->_divis]->set_rank (X->_rank, X->_wave,  X->_sdef->_pan, X->_sdef->_del);  
                 send_event (TO_MODEL, M);
-                M = 0;
+
 	        break;
 	    }
 	    case MT_AUDIO_SYNC:
                 send_event (TO_MODEL, M);
-                M = 0;
+
 		break;
 	} 
-        if (M) M->recover ();
+
     }
 }
+
+float AeolusAudio::getVolumeForDivision(int division_index) {
+    if((division_index<0 )| (division_index>(_ndivis-1)))
+    {
+        return 0;
+    }
+    return _divisp[division_index]->getParamGain();
+
+}
+
+void AeolusAudio::setVolumeForDivision(int division_index, float division_volume) {
+    if((division_index<0 )| (division_index>(_ndivis-1)))
+    {
+        return;
+    }
+    _divisp[division_index]->setParamGain(division_volume);
+}
+
+void AeolusAudio::setMidiMapBit(int my_division_index, int my_midi_channel_index,
+                                      bool is_checked) {
+
+
+    if((my_midi_channel_index<0) | (my_midi_channel_index > 15))
+    {
+        return;
+    }
+    if((my_division_index<0 )| (my_division_index>(_ndivis-1)))
+    {
+        return;
+    }
+
+    __android_log_print(android_LogPriority::ANDROID_LOG_INFO,
+                        "AeolusSynthesizer::setMidiMapBit",
+                        "updating midimap D=%d C=%d Value=%d",my_division_index,my_midi_channel_index,is_checked);
+
+
+    if(is_checked)
+    {
+        _midimap[my_midi_channel_index] |= (1 << my_division_index);
+    } else {
+        _midimap[my_midi_channel_index] &= ~(1 << my_division_index);
+    }
+
+
+}
+
+uint16_t AeolusAudio::get_midi_map_entry(int midi_index) {
+    if(midi_index <0 ) return 0;
+    if(midi_index > 15) return 0;
+    return _midimap[midi_index] & 0x000F;
+}
+
+bool AeolusAudio::tremulantIsOn(int division_index)
+{
+    if((division_index<0 )| (division_index>(_ndivis-1)))
+    {
+        return false;
+    }
+    return _divisp[division_index]->tremulantIsOn();
+
+}
+
+
+
+

@@ -18,21 +18,25 @@
 // ----------------------------------------------------------------------------
 
 
-#ifndef __SCALES_H
-#define __SCALES_H
+#ifndef AEOLUS_SCALES_H
+#define AEOLUS_SCALES_H
 
-
+/**
+ * Tuning temperament. The data is a an array with 12
+ * members that indicates the frequency multiplier from
+ * the lower base note (do) to each of the half-tones
+ */
 struct temper
 {
-    const char *_label;
-    const char *_mnemo;
-    float      *_data;
+    const char *_label; // label of the temperament
+    const char *_mnemo; // short label
+    float      *_data; // 12-membered array with the frequency ratio relative to base-note
 };
 
 
-#define NSCALES 11
+#define NSCALES 11 // fixed number of scales
 
-extern struct temper scales [NSCALES];
+extern struct temper scales [NSCALES]; // predefined scales
   
 
 #endif
