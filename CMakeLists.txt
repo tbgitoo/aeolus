@@ -4,12 +4,12 @@ include_directories(
 
 add_library(aeolus
         SHARED
-        source/addsynth.cpp
+        source/addsynth.cpp # Class and helper functions to hold the parameters for additive synthesis
         source/lfqueue.cpp # array allocation
-        source/rankwave.cpp # sample generation
+        source/rankwave.cpp # sample generation by harmonic superposition and other effects
         source/rngen.cpp # random number generation
         source/exp2ap.cpp # power of 2, specific function
-        source/asection.cpp # reverb
+        source/asection.cpp # Audio section: post-treatment of the generated sound signal (for example
         source/messages.cpp # messages for inter-process communication
         source/model.cpp # complete model of the entire organ
         source/scales.cpp # tuning scales
